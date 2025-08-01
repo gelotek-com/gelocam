@@ -12,3 +12,23 @@
   1. The bot sends an HTTP command to the ESP32.
   2. The ESP32 captures a series of photos and sends them to the server.
   3. The server stitches them into a video and sends it back to the user on Telegram.
+
+---
+
+## 🆕 Version 1.1 – Motion Detection Mode
+
+This update introduces a new **motion detection mode** to enhance surveillance capabilities.
+
+- Users can activate this mode via Telegram.
+- The ESP32 captures a photo every **0.5 seconds**.
+- Each new image is compared with the previous one by the server.
+- If a **difference** is detected, the server:
+  - Saves the triggering frame.
+  - Automatically generates a video using the same process as `/video`.
+
+
+---
+
+## 📄 License
+
+MIT License

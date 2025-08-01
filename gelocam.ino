@@ -3,17 +3,16 @@
 #include <ArduinoJson.h>
 #include "esp_camera.h"
 
-
 const char* ssid = "";
 const char* password = "";
 
-//url for http communication 
-const char* flask_server = "http://192.168.1.x:5000"; 
+// URL for HTTP communication
+const char* flask_server = "http://192.168.1.x:5000";
 
-//number of photos per video
+// Number of photos per video
 const int NUM_PICS = 20;
 
-//camera configuration
+// Camera configuration
 #define PWDN_GPIO_NUM    -1
 #define RESET_GPIO_NUM   -1
 #define XCLK_GPIO_NUM    15
@@ -61,7 +60,71 @@ void send_video() {
     http.end();
     esp_camera_fb_return(fb);
 
-    delay(500); // delay between sending photos
+    delay(500); // Delay between sending photos
+  }
+}
+
+void photo_check() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected");
+    return;
+  }
+
+  while (1) {
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb) {
+      Serial.println("Camera capture failed");
+      return;
+    }
+
+    HTTPClient http;
+    String url = String(flask_server) + "/check";
+    http.begin(url);
+    http.addHeader("Content-Type", "image/jpeg");
+
+    int httpResponseCode = http.POST(fb->buf, fb->len);
+
+    if (httpResponseCode > 0) {
+      Serial.printf("Photo sent. Response: %d\n", httpResponseCode);
+
+      String payload = http.getString();
+      Serial.println("Server response: " + payload);
+
+      // Parse JSON
+      DynamicJsonDocument doc(512);
+      DeserializationError error = deserializeJson(doc, payload);
+
+      if (!error) {
+        const char* action = doc["action"];
+        const char* mode = doc["mode"];
+
+        if (String(action) == "video") {
+          Serial.println("ALERT received");
+          esp_camera_fb_return(fb);
+          delay(500);
+          send_video();
+        }
+        if (String(mode) == "sensor") {
+          Serial.println("Continuing to check...");
+        }
+        if (String(mode) == "null") {
+          Serial.println("Stopping...");
+          esp_camera_fb_return(fb);
+          delay(500);
+          break;
+        }
+
+      } else {
+        Serial.println("JSON parsing error");
+      }
+
+    } else {
+      Serial.printf("Error sending photo: %s\n", http.errorToString(httpResponseCode).c_str());
+    }
+
+    http.end();
+    esp_camera_fb_return(fb);
+    delay(500);
   }
 }
 
@@ -69,7 +132,7 @@ void setup() {
   Serial.begin(115200);
   WiFi.begin(ssid, password);
 
-  Serial.print("Connecting WiFi...");
+  Serial.print("Connecting to WiFi...");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -109,7 +172,7 @@ void setup() {
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
-    Serial.println("⚠️ PSRAM NOT found.");
+    Serial.println("PSRAM NOT found.");
     config.frame_size = FRAMESIZE_QVGA;
     config.jpeg_quality = 12;
     config.fb_count = 1;
@@ -120,14 +183,14 @@ void setup() {
   esp_err_t err = esp_camera_init(&config);
 
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed! Code error: 0x%x\n", err);
+    Serial.printf("Camera init failed! Error code: 0x%x\n", err);
   } else {
-    Serial.println("Camera initialized correctly.");
+    Serial.println("Camera initialized successfully.");
   }
 }
 
 void loop() {
-  //The ESP checks every 10 seconds for new commands
+  // The ESP checks every 10 seconds for new commands
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     String url = String(flask_server) + "/command";
@@ -136,7 +199,7 @@ void loop() {
 
     if (httpCode > 0) {
       String payload = http.getString();
-      Serial.println("Flask answer: " + payload);
+      Serial.println("Flask response: " + payload);
 
       StaticJsonDocument<200> doc;
       DeserializationError error = deserializeJson(doc, payload);
@@ -148,18 +211,23 @@ void loop() {
         if (strcmp(command, "take_video") == 0) {
           Serial.println("Recording!");
           send_video();
-
         }
+
+        if (strcmp(command, "motion_sensor") == 0) {
+          Serial.println("ESP is watching!");
+          photo_check();
+        }
+
       } else {
         Serial.println("Error parsing JSON");
       }
     } else {
-      Serial.printf("Error HTTP request: \n", httpCode);
+      Serial.printf("HTTP request error: \n", httpCode);
     }
     http.end();
   } else {
     Serial.println("WiFi not connected");
   }
 
-  delay(5000); //Polling Delay 
+  delay(5000); // Polling delay
 }
